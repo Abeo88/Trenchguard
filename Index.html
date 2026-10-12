@@ -1,0 +1,233 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101c2c">
+  <title>TrenchGuard | Solana Token Scanner</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px 16px;
+      background: #101c2c; color: #f4f7fb;
+      font: 16px/1.5 Arial, sans-serif;
+    }
+    main { max-width: 680px; margin: auto; }
+    .brand { color: #8ce6c5; font-size: 13px;
+      font-weight: bold; letter-spacing: 2px; }
+    h1 { margin-bottom: 4px; font-size: 32px; }
+    .muted { color: #b7c5d8; }
+    .panel {
+      background: #1b2b40; border: 1px solid #34465d;
+      border-radius: 16px; padding: 18px; margin-top: 18px;
+    }
+    label { display: block; margin-bottom: 8px; font-weight: bold; }
+    input, button {
+      width: 100%; border-radius: 10px; padding: 14px;
+      font: inherit;
+    }
+    input {
+      background: #101c2c; color: white;
+      border: 1px solid #53677f; margin-bottom: 10px;
+    }
+    button {
+      background: #8ce6c5; color: #102b27;
+      font-weight: bold; border: 0; cursor: pointer;
+    }
+    button:disabled { opacity: .6; cursor: wait; }
+    #status { margin-top: 12px; color: #b7c5d8; }
+    .grid {
+      display: grid; grid-template-columns: repeat(2, 1fr);
+      gap: 10px; margin-top: 16px;
+    }
+    .metric {
+      padding: 13px; border-radius: 12px;
+      background: #26384e; overflow-wrap: anywhere;
+    }
+    .metric small { display: block; color: #b7c5d8; }
+    .metric strong { display: block; margin-top: 6px; font-size: 18px; }
+    a { color: #8ce6c5; }
+    .warning { font-size: 13px; color: #c7d2e1; }
+    [hidden] { display: none !important; }
+    @media (max-width: 380px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="brand">TRENCHGUARD</div>
+  <h1>Check before you ape.</h1>
+  <p class="muted">
+    Understand a Solana token's market data before making a decision.
+  </p>
+
+  <section class="panel">
+    <label for="address">Solana token mint address</label>
+    <input id="address" placeholder="Paste token address here"
+      autocomplete="off" spellcheck="false">
+    <button id="scan">Scan token</button>
+    <p id="status" role="status" aria-live="polite">
+      Enter a token address to begin.
+    </p>
+  </section>
+
+  <section id="report" class="panel" hidden>
+    <h2 id="tokenName"></h2>
+    <p id="tokenSymbol" class="muted"></p>
+    <div class="grid">
+      <div class="metric"><small>Price (USD)</small><strong id="price"></strong></div>
+      <div class="metric"><small>Market cap</small><strong id="cap"></strong></div>
+      <div class="metric"><small>Liquidity (USD)</small><strong id="liquidity"></strong></div>
+      <div class="metric"><small>24h volume</small><strong id="volume"></strong></div>
+      <div class="metric"><small>24h price change</small><strong id="change"></strong></div>
+      <div class="metric"><small>24h buys / sells</small><strong id="trades"></strong></div>
+    </div>
+    <p id="pairInfo" class="muted"></p>
+    <p><a id="dexLink" href="#" target="_blank"
+      rel="noopener noreferrer">View pair on DEX Screener</a></p>
+    <p class="warning">
+      Market data is not a safety verdict. Market cap may be unavailable.
+      Liquidity can change quickly. This report does not verify whether
+      a token is safe or whether your trade will successfully sell.
+    </p>
+  </section>
+
+  <p class="warning">
+    TrenchGuard is an independent learning project. Always verify token
+    addresses and do your own research.
+  </p>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const fields = [
+    "tokenName", "tokenSymbol", "price", "cap",
+    "liquidity", "volume", "change", "trades",
+    "pairInfo", "dexLink"
+  ];
+
+  function show(id, value) {
+    // Use textContent so token data is displayed as text, not HTML.
+    $(id).textContent = value;
+  }
+
+  function money(value) {
+    if (value === null || value === undefined ||
+        value === "" || !Number.isFinite(Number(value))) {
+      return "Unavailable";
+    }
+    return Number(value).toLocaleString("en-US", {
+      style: "currency", currency: "USD",
+      maximumSignificantDigits: 6
+    });
+  }
+
+  function compact(value) {
+    if (value === null || value === undefined ||
+        !Number.isFinite(Number(value))) return "Unavailable";
+    return Number(value).toLocaleString("en-US", {
+      notation: "compact", maximumFractionDigits: 2
+    });
+  }
+
+  function isSolanaAddress(value) {
+    // Basic Base58 shape check only; not proof the mint exists.
+    return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(value);
+  }
+
+  async function scanToken() {
+    const address = $("address").value.trim();
+    const button = $("scan");
+    $("report").hidden = true;
+
+    if (!isSolanaAddress(address)) {
+      show("status", "Please enter a valid-looking Solana address (32–44 Base58 characters).");
+      return;
+    }
+
+    button.disabled = true;
+    show("status", "Looking up market pairs…");
+
+    try {
+      const url =
+        "https://api.dexscreener.com/token-pairs/v1/solana/" +
+        encodeURIComponent(address);
+
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error("Market-data service returned HTTP " + response.status);
+      }
+
+      const pairs = await response.json();
+      if (!Array.isArray(pairs) || pairs.length === 0) {
+        show("status", "No market pairs found. The token may be new, unlisted, or not trading.");
+        return;
+      }
+
+      // Prefer the pair with the greatest reported USD liquidity.
+      const validPairs = pairs.filter(p => p && p.baseToken && p.quoteToken);
+      if (!validPairs.length) {
+        show("status", "The provider returned no usable pair data.");
+        return;
+      }
+
+      validPairs.sort((a, b) =>
+        (Number(b.liquidity?.usd) || 0) -
+        (Number(a.liquidity?.usd) || 0)
+      );
+
+      const p = validPairs[0];
+      const token = p.baseToken.address === address
+        ? p.baseToken : p.quoteToken;
+
+      show("tokenName", token.name || "Unknown token");
+      show("tokenSymbol", token.symbol ? "$" + token.symbol : "Symbol unavailable");
+      show("price", money(p.priceUsd));
+      show("cap", money(p.marketCap));
+      show("liquidity", money(p.liquidity?.usd));
+      show("volume", money(p.volume?.h24));
+
+      const change = p.priceChange?.h24;
+      show("change",
+        change === null || change === undefined ||
+        !Number.isFinite(Number(change))
+          ? "Unavailable" : Number(change).toFixed(2) + "%"
+      );
+
+      show("trades",
+        compact(p.txns?.h24?.buys) + " / " +
+        compact(p.txns?.h24?.sells)
+      );
+
+      const age = p.pairCreatedAt
+        ? new Date(p.pairCreatedAt).toLocaleString()
+        : "Unavailable";
+
+      show("pairInfo",
+        "Pair: " + (p.dexId || "Unknown DEX") +
+        " · Pair created: " + age +
+        " · Pairs found: " + validPairs.length
+      );
+
+      $("dexLink").href = p.url || "https://dexscreener.com/";
+      $("report").hidden = false;
+      show("status", "Market data loaded. This is not a safety assessment.");
+    } catch (error) {
+      show("status",
+        "Could not load market data. Check your connection and try again. " +
+        "Details: " + error.message
+      );
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  $("scan").addEventListener("click", scanToken);
+  $("address").addEventListener("keydown", event => {
+    if (event.key === "Enter") scanToken();
+  });
+</script>
+</body>
+</html>
